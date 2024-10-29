@@ -35,7 +35,7 @@ build:
 
 .PHONY: release
 ## Tag, build, and create a GitHub release
-release: clean tag all container create-release
+release: clean tag all create-release
 
 .PHONY: tag
 ## Tag the current code
@@ -46,7 +46,7 @@ tag:
 .PHONY: create-release
 ## Create a GitHub release
 create-release:
-	gh release create v$(VERSION) $(OUTPUT_DIR)/proxydns_$(VERSION)* -t "Release $(VERSION)" -n "ProxyDNS $(VERSION)"
+	gh release create v$(VERSION) $(OUTPUT_DIR)/renamefiles_$(VERSION)* -t "Release $(VERSION)" -n "Rename Files $(VERSION)"
 
 .PHONY: help
 ## This help screen
