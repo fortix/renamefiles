@@ -4,6 +4,7 @@ import (
 	"encoding/csv"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/fortix/renamefiles/internal/build"
@@ -34,6 +35,9 @@ var rootCmd = &cobra.Command{
 
 		viper.BindPFlag("dst-base", cmd.Flags().Lookup("dst-base"))
 		viper.BindEnv("dst-base", CONFIG_ENV_PREFIX+"_DST_BASE")
+
+		viper.BindPFlag("copy-only", cmd.Flags().Lookup("copy-only"))
+		viper.BindEnv("copy-only", CONFIG_ENV_PREFIX+"_COPY_ONLY")
 
 	},
 	Run: renameCmd,
@@ -77,6 +81,7 @@ func init() {
 	rootCmd.Flags().StringP("csv", "", "", "The CSV file to use for renaming.\nOverrides the "+CONFIG_ENV_PREFIX+"_CSV environment variable if set.")
 	rootCmd.Flags().StringP("src-base", "", "", "Optional base path for source files.\nOverrides the "+CONFIG_ENV_PREFIX+"_SRC_BASE environment variable if set.")
 	rootCmd.Flags().StringP("dst-base", "", "", "Optional base path for destination files.\nOverrides the "+CONFIG_ENV_PREFIX+"_DST_BASE environment variable if set.")
+	rootCmd.Flags().BoolP("copy-only", "", false, "Optional flag to force copy only instead of moving files. \nOverrides the "+CONFIG_ENV_PREFIX+"_COPY_ONLY environment variable if set.")
 }
 
 func initConfig() {
@@ -96,15 +101,10 @@ func initConfig() {
 }
 
 func renameCmd(cmd *cobra.Command, args []string) {
-
-	// Check that csv file is provided
-	if viper.GetString("csv") == "" {
-		log.Fatal().Msgf("You must provide a CSV file")
-	}
-
 	// Get the source and destination base paths
 	srcBase := strings.TrimRight(viper.GetString("src-base"), "/")
 	dstBase := strings.TrimRight(viper.GetString("dst-base"), "/")
+	copyOnly := viper.GetBool("copy-only")
 
 	if srcBase != "" {
 		srcBase += "/"
@@ -113,38 +113,68 @@ func renameCmd(cmd *cobra.Command, args []string) {
 		dstBase += "/"
 	}
 
-	// Open the CSV file and read each line outputting it to the log
-	log.Info().Msgf("Reading CSV file: %s", viper.GetString("csv"))
-	file, err := os.Open(viper.GetString("csv"))
+	// Get the list of CSV files using a wildcard
+	csvFiles, err := filepath.Glob(viper.GetString("csv"))
 	if err != nil {
-		log.Fatal().Err(err).Msg("Failed to open CSV file")
+		log.Fatal().Err(err).Msg("Failed to find CSV files")
 	}
-	defer file.Close()
 
-	reader := csv.NewReader(file)
-	for {
-		record, err := reader.Read()
-		if err == io.EOF {
-			break
-		}
+	if len(csvFiles) == 0 {
+		log.Fatal().Msg("No CSV files found")
+	}
+
+	for _, csvFile := range csvFiles {
+		// Open the CSV file and read each line outputting it to the log
+		log.Info().Msgf("Reading CSV file: %s", csvFile)
+		file, err := os.Open(csvFile)
 		if err != nil {
-			log.Fatal().Err(err).Msg("Failed to read CSV file")
+			log.Fatal().Err(err).Msg("Failed to open CSV file")
 		}
-		if len(record) < 2 {
-			log.Warn().Msg("CSV row does not have at least two columns")
-			continue
+		defer file.Close()
+
+		reader := csv.NewReader(file)
+		for {
+			record, err := reader.Read()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				log.Fatal().Err(err).Msg("Failed to read CSV file")
+			}
+			if len(record) < 2 {
+				log.Warn().Msg("CSV row does not have at least two columns")
+				continue
+			}
+
+			// Make the source and destination paths
+			from := srcBase + record[0]
+			to := dstBase + record[1]
+
+			log.Info().Msgf("Renaming %s to %s", from, to)
+
+			// move or copy the file
+			if copyOnly {
+				input, err := os.ReadFile(from)
+				if err != nil {
+					log.Error().Err(err).Msgf("Failed to read %s", from)
+				} else {
+					err = os.WriteFile(to, input, 0644)
+					if err != nil {
+						log.Error().Err(err).Msgf("Failed to write %s", to)
+					}
+				}
+			} else {
+				err = os.Rename(from, to)
+				if err != nil {
+					log.Error().Err(err).Msgf("Failed to rename %s to %s", from, to)
+				}
+			}
 		}
 
-		// Make the source and destination paths
-		from := srcBase + record[0]
-		to := dstBase + record[1]
-
-		log.Info().Msgf("Renaming %s to %s", from, to)
-
-		// Rename the file
-		err = os.Rename(from, to)
+		// Rename the original file to have a .processed extension
+		err = os.Rename(csvFile, csvFile+".processed")
 		if err != nil {
-			log.Error().Err(err).Msgf("Failed to rename %s to %s", from, to)
+			log.Error().Err(err).Msgf("Failed to rename %s to %s.processed", csvFile, csvFile)
 		}
 	}
 }
