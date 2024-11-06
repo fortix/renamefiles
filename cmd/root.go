@@ -130,7 +130,6 @@ func renameCmd(cmd *cobra.Command, args []string) {
 		if err != nil {
 			log.Fatal().Err(err).Msg("Failed to open CSV file")
 		}
-		defer file.Close()
 
 		reader := csv.NewReader(file)
 		for {
@@ -170,6 +169,7 @@ func renameCmd(cmd *cobra.Command, args []string) {
 				}
 			}
 		}
+		file.Close()
 
 		// Rename the original file to have a .processed extension
 		err = os.Rename(csvFile, csvFile+".processed")
