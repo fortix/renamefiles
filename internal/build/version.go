@@ -1,5 +1,5 @@
 package build
 
 var (
-	Version string = "0.4.0"
+	Version string = "0.5.0"
 )

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/csv"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -132,49 +133,77 @@ func renameCmd(cmd *cobra.Command, args []string) {
 		}
 
 		reader := csv.NewReader(file)
+
+		// an array to collect all errors
+		var errors []string
+		var line int = 0
 		for {
 			record, err := reader.Read()
 			if err == io.EOF {
 				break
 			}
+
 			if err != nil {
 				log.Fatal().Err(err).Msg("Failed to read CSV file")
+				errors = append(errors, err.Error())
 			}
+			line++
 			if len(record) < 2 {
-				log.Warn().Msg("CSV row does not have at least two columns")
-				continue
-			}
-
-			// Make the source and destination paths
-			from := srcBase + record[0]
-			to := dstBase + record[1]
-
-			log.Info().Msgf("Renaming %s to %s", from, to)
-
-			// move or copy the file
-			if copyOnly {
-				input, err := os.ReadFile(from)
-				if err != nil {
-					log.Error().Err(err).Msgf("Failed to read %s", from)
-				} else {
-					err = os.WriteFile(to, input, 0644)
-					if err != nil {
-						log.Error().Err(err).Msgf("Failed to write %s", to)
-					}
-				}
+				log.Warn().Msgf("Line %d: CSV row does not have at least two columns", line)
+				errors = append(errors, "CSV row does not have at least two columns")
 			} else {
-				err = os.Rename(from, to)
-				if err != nil {
-					log.Error().Err(err).Msgf("Failed to rename %s to %s", from, to)
+				// Make the source and destination paths
+				from := srcBase + record[0]
+				to := dstBase + record[1]
+
+				if copyOnly {
+					message := fmt.Sprintf("Line %d: Copying %s to %s", line, from, to)
+					log.Info().Msgf(message)
+				} else {
+					message := fmt.Sprintf("Line %d: Renaming %s to %s", line, from, to)
+					log.Info().Msg(message)
+				}
+
+				// move or copy the file
+				if copyOnly {
+					input, err := os.ReadFile(from)
+					if err != nil {
+						message := fmt.Sprintf("Line %d: Failed to read %s", line, from)
+						log.Error().Err(err).Msg(message)
+						errors = append(errors, message)
+					} else {
+						err = os.WriteFile(to, input, 0644)
+						if err != nil {
+							message := fmt.Sprintf("Line %d: Failed to write %s", line, to)
+							log.Error().Err(err).Msg(message)
+							errors = append(errors, message)
+						}
+					}
+				} else {
+					err = os.Rename(from, to)
+					if err != nil {
+						message := fmt.Sprintf("Line %d: Failed to rename/copy %s to %s", line, from, to)
+						log.Error().Err(err).Msg(message)
+						errors = append(errors, message)
+					}
 				}
 			}
 		}
 		file.Close()
 
-		// Rename the original file to have a .processed extension
-		err = os.Rename(csvFile, csvFile+".processed")
-		if err != nil {
-			log.Error().Err(err).Msgf("Failed to rename %s to %s.processed", csvFile, csvFile)
+		// If there were no errors then rename the CSV file
+		if len(errors) == 0 {
+			// Rename the original file to have a .processed extension
+			err = os.Rename(csvFile, csvFile+".processed")
+			if err != nil {
+				log.Error().Err(err).Msgf("Failed to rename %s to %s.processed", csvFile, csvFile)
+			}
+		} else {
+			// dump all errors to a file
+			err = os.WriteFile(csvFile+".errors", []byte(strings.Join(errors, "\n")), 0644)
+			if err != nil {
+				log.Error().Err(err).Msgf("Failed to write %s.errors", csvFile)
+			}
 		}
 	}
 }
